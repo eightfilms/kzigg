@@ -15,3 +15,9 @@ You need Zig installed and `blst` built to use as a static library.
 ```sh
 zig build test -Doptimize=ReleaseSafe
 ```
+
+## Benchmark
+
+```sh
+zig build benchmark
+```

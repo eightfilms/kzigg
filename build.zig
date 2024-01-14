@@ -15,6 +15,21 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+
+    const bench = b.addExecutable(.{
+        .name = "bench",
+        // In this case the main source file is merely a path, however, in more
+        // complicated build scripts, this could be a generated file.
+        .root_source_file = .{ .path = "src/bench.zig" },
+        .target = target,
+        .optimize = b.standardOptimizeOption(.{ .preferred_optimize_mode = .ReleaseSafe }),
+    });
+
+    bench.addLibraryPath(.{ .path = "src/main.zig" });
+    bench.addIncludePath(.{ .path = "blst/bindings" });
+    bench.addLibraryPath(.{ .path = "blst" });
+    bench.addObjectFile(.{ .path = "blst/libblst.a" });
+
     lib.linkLibC();
     lib.addIncludePath(.{ .path = "blst/bindings" });
     lib.addLibraryPath(.{ .path = "blst" });
@@ -24,6 +39,14 @@ pub fn build(b: *std.Build) void {
     // location when the user invokes the "install" step (the default step when
     // running `zig build`).
     b.installArtifact(lib);
+    const install_step = b.addInstallArtifact(bench, .{});
+    const build_step = b.step("build bench", "Build benchmarks");
+
+    build_step.dependOn(&install_step.step);
+    const run_cmd = b.addRunArtifact(bench);
+    const run_step = b.step("benchmark", "Run KZG commitment benchmark");
+
+    run_step.dependOn(&run_cmd.step);
 
     // Creates a step for unit testing. This only builds the test executable
     // but does not run it.
