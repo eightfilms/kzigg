@@ -9,7 +9,7 @@ const blst = @cImport({
 
 const Limb = blst.limb_t;
 const Scalar = blst.blst_scalar;
-const Fr = blst.blst_fr;
+pub const Fr = blst.blst_fr;
 const Fp = blst.blst_fp;
 const Fp2 = blst.blst_fp2;
 const Fp6 = blst.blst_fp6;
@@ -44,9 +44,9 @@ const FieldError = error{
 const CHALLENGE_INPUT_SIZE: usize = DOMAIN_STR_LENGTH + 16 + BYTES_PER_BLOB + BYTES_PER_G1_COMPRESSED;
 
 /// Number of field elements in a blob as defined in EIP-4844.
-const FIELD_ELEMENTS_PER_BLOB = 4096;
+pub const FIELD_ELEMENTS_PER_BLOB = 4096;
 
-const BYTES_PER_BLOB = @sizeOf(Fr) * FIELD_ELEMENTS_PER_BLOB;
+pub const BYTES_PER_BLOB = @sizeOf(Fr) * FIELD_ELEMENTS_PER_BLOB;
 
 /// The domain separator for the Fiat-Shamir protocol.
 const FIAT_SHAMIR_PROTOCOL_DOMAIN = "FSBLOBVERIFY_V1_";
@@ -110,7 +110,7 @@ const SCALE2_ROOT_OF_UNITY: [32][4]u64 = [32][4]u64{
 };
 
 /// A struct to represent data from the trusted setup.
-const KZGTrustedSetupConfig = struct {
+pub const KZGTrustedSetupConfig = struct {
     allocator: Allocator,
     roots_of_unity: []Fr,
     g1_values: []G1,
@@ -120,7 +120,7 @@ const KZGTrustedSetupConfig = struct {
     const Self = @This();
 
     /// Loads data from path for a trusted setup.
-    fn loadFromFile(allocator: Allocator, trusted_setup_path: []const u8) !Self {
+    pub fn loadFromFile(allocator: Allocator, trusted_setup_path: []const u8) !Self {
         const fd = try std.fs.cwd().openFile(trusted_setup_path, .{});
         defer fd.close();
         var buf_reader = std.io.bufferedReader(fd.reader());
@@ -199,13 +199,14 @@ const KZGTrustedSetupConfig = struct {
         };
     }
 
-    fn deinit(self: Self) void {
+    pub fn deinit(self: Self) void {
         self.allocator.free(self.g1_values);
         self.allocator.free(self.g2_values);
         self.allocator.free(self.roots_of_unity);
     }
 };
-// Subtract two G2 group elements.
+
+/// Subtract two G2 group elements.
 pub fn g1Sub(a: G1, b: G1) G1 {
     var b_neg: G1 = b;
     var out: G1 = undefined;
@@ -216,6 +217,7 @@ pub fn g1Sub(a: G1, b: G1) G1 {
     return out;
 }
 
+/// Generate a random G1 element. Useful for tests.
 pub fn g1Rand() !G1 {
     const len: usize = 32;
     var buf: [len]u8 = undefined;
@@ -235,6 +237,7 @@ pub fn g1Mul(g: G1, fr: Fr) G1 {
     return out;
 }
 
+/// Generate a random G2 element. Useful for tests.
 pub fn g2Rand() !G2 {
     const len: usize = 32;
     var buf: [len]u8 = undefined;
@@ -255,7 +258,7 @@ fn g2Mul(g: G2, fr: Fr) G2 {
     return out;
 }
 
-// Subtract two G2 group elements.
+/// Subtract two G2 group elements.
 fn g2Sub(a: G2, b: G2) G2 {
     var b_neg: G2 = b;
     var out: G2 = undefined;
@@ -265,6 +268,7 @@ fn g2Sub(a: G2, b: G2) G2 {
 
     return out;
 }
+
 /// Naive linear combination of G1 group elements.
 ///
 /// `[coefficients_0]p_0 + [coefficients_1]p_1 + ... + [coefficients_n]p_n` where
@@ -343,6 +347,8 @@ fn hashToBlsField(in: [32]u8) Fr {
     return fr;
 }
 
+/// Essentially the same as `hashToBlsField`, but with a check on the
+/// scalar value.
 fn bytesToBlsField(in: [32]u8) !Fr {
     var scalar: Scalar = undefined;
     var fr: Fr = undefined;
@@ -355,7 +361,7 @@ fn bytesToBlsField(in: [32]u8) !Fr {
 }
 
 /// Serialize a BLS field element into bytes.
-fn bytesFromBlsField(fr: Fr) [32]u8 {
+pub fn bytesFromBlsField(fr: Fr) [32]u8 {
     var s: Scalar = undefined;
     var out: [32]u8 = undefined;
 
@@ -366,7 +372,7 @@ fn bytesFromBlsField(fr: Fr) [32]u8 {
 }
 
 /// Initialize and return a random field element. Useful for tests.
-fn frRand() !Fr {
+pub fn frRand() !Fr {
     var buf: [32]u8 = undefined;
     try std.os.getrandom(&buf);
 
@@ -568,7 +574,7 @@ fn g1FromBytes(raw_commitment: [48]u8) !G1 {
 
 /// Compute a KZG commitment from a polynomial. The resulting
 /// commitment is a compressed G1 point, 48 bytes in size.
-fn commitmentBytesFromBlob(
+pub fn commitmentBytesFromBlob(
     allocator: Allocator,
     blob: []u8,
     cfg: KZGTrustedSetupConfig,
@@ -601,7 +607,7 @@ fn computeKzgProofLagrange(
     return try computeKzgProof(allocator, polynomial, z, cfg);
 }
 
-fn computeKzgProofBlob(
+pub fn computeKzgProofBlob(
     allocator: Allocator,
     blob: []u8,
     commitment_raw: [48]u8,
@@ -618,6 +624,9 @@ fn computeKzgProofBlob(
     return proof_raw;
 }
 
+/// Compute KZG proof at point `z` for the polynomial represented by a blob.
+/// This is done by computing the quotient polynomial in evaluation form, i.e.
+/// q(x) = (p(x) - p(z)) / (x - z)
 fn computeKzgProof(
     allocator: Allocator,
     polynomial: Polynomial,
@@ -630,13 +639,13 @@ fn computeKzgProof(
     defer allocator.free(inverses_in);
 
     var m: u64 = 0;
-    const y = try polynomial.evalAt(z, cfg);
     var q = Polynomial{
         .evals = undefined,
         .allocator = allocator,
     };
     q.evals = try allocator.alloc(Fr, FIELD_ELEMENTS_PER_BLOB);
 
+    const y = try polynomial.evalAt(z, cfg);
     for (0..FIELD_ELEMENTS_PER_BLOB) |i| {
         if (std.meta.eql(z, cfg.roots_of_unity[i])) {
             m = i + 1;
@@ -645,6 +654,7 @@ fn computeKzgProof(
         }
 
         // (p_i - y) / (ω_i - z)
+        // Here as computed above, y is simply p(z).
         blst.blst_fr_sub(&q.evals[i], &polynomial.evals[i], &y);
         blst.blst_fr_sub(&inverses_in[i], &cfg.roots_of_unity[i], &z);
     }
@@ -668,6 +678,7 @@ fn computeKzgProof(
 
         for (0..FIELD_ELEMENTS_PER_BLOB) |i| {
             if (i == m) continue;
+            // Build denominator: z * (z - ω_i)
             blst.blst_fr_sub(&tmp, &z, &cfg.roots_of_unity[i]);
             blst.blst_fr_mul(&inverses_in[i], &tmp, &z);
         }
@@ -683,7 +694,7 @@ fn computeKzgProof(
             blst.blst_fr_sub(&tmp, &polynomial.evals[i], &y);
             blst.blst_fr_mul(&tmp, &tmp, &cfg.roots_of_unity[i]);
 
-            // Do division: w_i * (p_i - y)
+            // Do division: ω_i * (p_i - y) / (z * (z - ω_i))
             blst.blst_fr_mul(&tmp, &tmp, &inverses[i]);
             blst.blst_fr_add(&q.evals[m], &q.evals[m], &tmp);
         }
@@ -738,7 +749,7 @@ fn verifyKzgProof(
     const x_g2 = g2Mul(p2_generator.*, z);
     const x_minus_z = g2Sub(cfg.g2_values[1], x_g2);
 
-    // P - z
+    // P - y
     const y_g1 = g1Mul(p1_generator.*, y);
     const p_minus_y = g1Sub(commitment, y_g1);
 
@@ -816,7 +827,7 @@ fn computeRPowers(out: []Fr, allocator: Allocator, commitments: []G1, zs: []Fr, 
 
 /// Verify that a list of provided commitments attest to a
 /// list of blobs and accompanying blob KZG proofs.
-fn verifyKzgProofBlobBatch(
+pub fn verifyKzgProofBlobBatch(
     allocator: Allocator,
     proofs_raw: [][48]u8,
     commitments_raw: [][48]u8,
@@ -1191,14 +1202,14 @@ test "compute and verify: succeeds round trip" {
 
     const commitment_raw = try commitmentBytesFromBlob(allocator, &blob, cfg);
     const z = try frRand();
-    const y = try p.evalAt(z, cfg);
     const z_raw = bytesFromBlsField(z);
 
-    const proof_raw, _ = try computeKzgProofLagrange(allocator, &blob, z_raw, cfg);
+    const proof_raw, const y = try computeKzgProofLagrange(allocator, &blob, z_raw, cfg);
 
     const commitment = try g1FromBytes(commitment_raw);
     const proof = try g1FromBytes(proof_raw);
-    try std.testing.expect(try verifyKzgProof(proof, commitment, z, y, cfg));
+    const y_fr = hashToBlsField(y);
+    try std.testing.expect(try verifyKzgProof(proof, commitment, z, y_fr, cfg));
 }
 
 test "compute and verify: succeeds within domain" {
