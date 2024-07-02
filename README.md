@@ -10,6 +10,8 @@ _Disclaimer: this repository is me learning how KZG and 4844 works underneath an
 
 You need Zig installed and `blst` built to use as a static library.
 
+This repo is built and tested on `v0.13.0`.
+
 ## Test
 
 ```sh

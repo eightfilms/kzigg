@@ -11,7 +11,7 @@ pub fn build(b: *std.Build) void {
         .name = "kzigg",
         // In this case the main source file is merely a path, however, in more
         // complicated build scripts, this could be a generated file.
-        .root_source_file = .{ .path = "src/main.zig" },
+        .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
     });
@@ -20,20 +20,20 @@ pub fn build(b: *std.Build) void {
         .name = "bench",
         // In this case the main source file is merely a path, however, in more
         // complicated build scripts, this could be a generated file.
-        .root_source_file = .{ .path = "src/bench.zig" },
+        .root_source_file = b.path("src/bench.zig"),
         .target = target,
         .optimize = b.standardOptimizeOption(.{ .preferred_optimize_mode = .ReleaseSafe }),
     });
 
-    bench.addLibraryPath(.{ .path = "src/main.zig" });
-    bench.addIncludePath(.{ .path = "blst/bindings" });
-    bench.addLibraryPath(.{ .path = "blst" });
-    bench.addObjectFile(.{ .path = "blst/libblst.a" });
+    bench.addLibraryPath(b.path("src/main.zig"));
+    bench.addIncludePath(b.path("blst/bindings"));
+    bench.addLibraryPath(b.path("blst"));
+    bench.addObjectFile(b.path("blst/libblst.a"));
 
     lib.linkLibC();
-    lib.addIncludePath(.{ .path = "blst/bindings" });
-    lib.addLibraryPath(.{ .path = "blst" });
-    lib.addObjectFile(.{ .path = "blst/libblst.a" });
+    lib.addIncludePath(b.path("blst/bindings"));
+    lib.addLibraryPath(b.path("blst"));
+    lib.addObjectFile(b.path("blst/libblst.a"));
 
     // This declares intent for the library to be installed into the standard
     // location when the user invokes the "install" step (the default step when
@@ -53,15 +53,15 @@ pub fn build(b: *std.Build) void {
     const filter = b.option([]const u8, "test-filter", "Filter for tests");
 
     const main_tests = b.addTest(.{
-        .root_source_file = .{ .path = "src/main.zig" },
+        .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
         .filter = filter,
     });
     main_tests.linkLibC();
-    main_tests.addIncludePath(.{ .path = "blst/bindings" });
-    main_tests.addLibraryPath(.{ .path = "blst" });
-    main_tests.addObjectFile(.{ .path = "blst/libblst.a" });
+    main_tests.addIncludePath(b.path("blst/bindings"));
+    main_tests.addLibraryPath(b.path("blst"));
+    main_tests.addObjectFile(b.path("blst/libblst.a"));
 
     const run_main_tests = b.addRunArtifact(main_tests);
 
