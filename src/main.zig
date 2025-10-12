@@ -273,7 +273,7 @@ fn g2Sub(a: G2, b: G2) G2 {
 ///
 /// `[coefficients_0]p_0 + [coefficients_1]p_1 + ... + [coefficients_n]p_n` where
 /// `n` == `len - 1`.
-fn g1LinearCombinationNaive(p: []G1, coefficients: []Fr) G1 {
+fn g1LinearCombinationNaive(p: []G1, coefficients: []const Fr) G1 {
     assert(p.len == coefficients.len);
 
     var tmp: G1 = undefined;
@@ -292,7 +292,7 @@ fn g1LinearCombinationNaive(p: []G1, coefficients: []Fr) G1 {
 ///
 /// `[coefficients_0]p_0 + [coefficients_1]p_1 + ... + [coefficients_n]p_n` where
 /// `n` == `len - 1`.
-fn g1LinearCombination(allocator: Allocator, p: []G1, coefficients: []Fr) !G1 {
+fn g1LinearCombination(allocator: Allocator, p: []G1, coefficients: []const Fr) !G1 {
     assert(p.len == coefficients.len);
 
     // const out = G1_IDENTITY;
@@ -495,30 +495,27 @@ fn computeRootsOfUnity(roots: *[]Fr, max_scale: u6, max_width: u64) !void {
 const Polynomial = struct {
     const Self = @This();
 
-    allocator: Allocator,
-    evals: []Fr,
+    evals: [FIELD_ELEMENTS_PER_BLOB]Fr,
 
     /// Initializes a Polynomial (array of field elements) from an
     /// array of bytes.
-    pub fn fromBlob(allocator: Allocator, blob: []u8) !Self {
-        const evals = try allocator.alloc(Fr, FIELD_ELEMENTS_PER_BLOB);
-        errdefer allocator.free(evals);
+    pub fn fromBlob(blob: []u8) !Self {
+        var evals: [FIELD_ELEMENTS_PER_BLOB]Fr = undefined;
         for (0..FIELD_ELEMENTS_PER_BLOB) |i| {
             evals[i] = try bytesToBlsField(blob[i * @sizeOf(Fr) ..][0..@sizeOf(Fr)].*);
         }
 
         return .{
-            .allocator = allocator,
             .evals = evals,
         };
     }
 
     /// Evaluate a polynomial (in evaluation form) at a given point `x`.
-    pub fn evalAt(self: Self, x: Fr, s: KZGTrustedSetupConfig) !Fr {
-        var inverses: []Fr = try self.allocator.alloc(Fr, FIELD_ELEMENTS_PER_BLOB);
-        defer self.allocator.free(inverses);
-        var inverses_in: []Fr = try self.allocator.alloc(Fr, FIELD_ELEMENTS_PER_BLOB);
-        defer self.allocator.free(inverses_in);
+    pub fn evalAt(self: Self, allocator: Allocator, x: Fr, s: KZGTrustedSetupConfig) !Fr {
+        var inverses: []Fr = try allocator.alloc(Fr, FIELD_ELEMENTS_PER_BLOB);
+        defer allocator.free(inverses);
+        var inverses_in: []Fr = try allocator.alloc(Fr, FIELD_ELEMENTS_PER_BLOB);
+        defer allocator.free(inverses_in);
         for (0..FIELD_ELEMENTS_PER_BLOB) |i| {
             // Return result directly if point to evaluate is
             // one of the evaluation points by which the polynomial
@@ -545,10 +542,6 @@ const Polynomial = struct {
         blst.blst_fr_mul(&out, &out, &tmp);
 
         return out;
-    }
-
-    pub fn deinit(self: Self) void {
-        self.allocator.free(self.evals);
     }
 };
 
@@ -580,8 +573,7 @@ pub fn commitmentBytesFromBlob(
     cfg: KZGTrustedSetupConfig,
 ) ![48]u8 {
     var out: [48]u8 = undefined;
-    const p = try Polynomial.fromBlob(allocator, blob);
-    defer p.deinit();
+    const p = try Polynomial.fromBlob(blob);
     const c = try commitmentFromPolynomial(allocator, cfg.g1_values, p);
     blst.blst_p1_compress(&out, &c);
 
@@ -591,7 +583,7 @@ pub fn commitmentBytesFromBlob(
 /// Compute a KZG commitment from a polynomial. The resulting
 /// commitment is just a G1 point, 48 bytes in size.
 fn commitmentFromPolynomial(allocator: Allocator, g1_values: []G1, p: Polynomial) !G1 {
-    return try g1LinearCombination(allocator, g1_values, p.evals);
+    return try g1LinearCombination(allocator, g1_values, &p.evals);
 }
 
 /// Compute KZG proof for a polynomial in Lagrange form at position z.
@@ -601,8 +593,7 @@ fn computeKzgProofLagrange(
     z_raw: [32]u8,
     cfg: KZGTrustedSetupConfig,
 ) !struct { [48]u8, [32]u8 } {
-    const polynomial = try Polynomial.fromBlob(allocator, blob);
-    defer polynomial.deinit();
+    const polynomial = try Polynomial.fromBlob(blob);
     const z = try bytesToBlsField(z_raw);
     return try computeKzgProof(allocator, polynomial, z, cfg);
 }
@@ -614,8 +605,7 @@ pub fn computeKzgProofBlob(
     cfg: KZGTrustedSetupConfig,
 ) ![48]u8 {
     const commitment: G1 = try g1FromBytes(commitment_raw);
-    const polynomial = try Polynomial.fromBlob(allocator, blob);
-    defer polynomial.deinit();
+    const polynomial = try Polynomial.fromBlob(blob);
 
     const challenge = try computeChallenge(blob, commitment);
 
@@ -639,13 +629,10 @@ fn computeKzgProof(
     defer allocator.free(inverses_in);
 
     var m: u64 = 0;
-    var q = Polynomial{
-        .evals = undefined,
-        .allocator = allocator,
-    };
-    q.evals = try allocator.alloc(Fr, FIELD_ELEMENTS_PER_BLOB);
+    const evals: [FIELD_ELEMENTS_PER_BLOB]Fr = undefined;
+    var q = Polynomial{ .evals = evals };
 
-    const y = try polynomial.evalAt(z, cfg);
+    const y = try polynomial.evalAt(allocator, z, cfg);
     for (0..FIELD_ELEMENTS_PER_BLOB) |i| {
         if (std.meta.eql(z, cfg.roots_of_unity[i])) {
             m = i + 1;
@@ -658,7 +645,6 @@ fn computeKzgProof(
         blst.blst_fr_sub(&q.evals[i], &polynomial.evals[i], &y);
         blst.blst_fr_sub(&inverses_in[i], &cfg.roots_of_unity[i], &z);
     }
-    defer q.deinit();
 
     try frBatchInverse(
         &inverses,
@@ -700,7 +686,7 @@ fn computeKzgProof(
         }
     }
 
-    const g1 = try g1LinearCombination(allocator, cfg.g1_values, q.evals);
+    const g1 = try g1LinearCombination(allocator, cfg.g1_values, &q.evals);
     var proof_raw: [48]u8 = undefined;
     blst.blst_p1_compress(&proof_raw, &g1);
 
@@ -771,13 +757,12 @@ fn verifyKzgProofBlob(
     cfg: KZGTrustedSetupConfig,
 ) !bool {
     const commitment: G1 = try g1FromBytes(commitment_raw);
-    const polynomial: Polynomial = try Polynomial.fromBlob(allocator, blob);
-    defer polynomial.deinit();
+    const polynomial: Polynomial = try Polynomial.fromBlob(blob);
     const proof: G1 = try g1FromBytes(proof_raw);
 
     const challenge = try computeChallenge(blob, commitment);
 
-    const y = try polynomial.evalAt(challenge, cfg);
+    const y = try polynomial.evalAt(allocator, challenge, cfg);
 
     return verifyKzgProof(proof, commitment, challenge, y, cfg);
 }
@@ -849,11 +834,10 @@ pub fn verifyKzgProofBlobBatch(
 
     for (0..n) |i| {
         commitments[i] = try g1FromBytes(commitments_raw[i]);
-        var polynomial = try Polynomial.fromBlob(allocator, &blobs_raw[i]);
-        defer polynomial.deinit();
+        var polynomial = try Polynomial.fromBlob(&blobs_raw[i]);
 
         challenges[i] = try computeChallenge(&blobs_raw[i], commitments[i]);
-        ys[i] = try polynomial.evalAt(challenges[i], cfg);
+        ys[i] = try polynomial.evalAt(allocator, challenges[i], cfg);
 
         proofs[i] = try g1FromBytes(proofs_raw[i]);
     }
@@ -938,17 +922,14 @@ test "Polynomial: test evaluate constant polynomial" {
 
     const allocator = std.testing.allocator;
 
-    const evals = try allocator.alloc(Fr, FIELD_ELEMENTS_PER_BLOB);
+    var evals: [FIELD_ELEMENTS_PER_BLOB]Fr = undefined;
+
     for (0..FIELD_ELEMENTS_PER_BLOB) |i| evals[i] = c;
-    var p = Polynomial{
-        .evals = evals,
-        .allocator = allocator,
-    };
-    defer p.deinit();
+    var p = Polynomial{ .evals = evals };
 
     const cfg = try KZGTrustedSetupConfig.loadFromFile(allocator, "./src/trusted_setup.txt");
     defer cfg.deinit();
-    const y = try p.evalAt(x, cfg);
+    const y = try p.evalAt(allocator, x, cfg);
 
     try std.testing.expectEqual(c, y);
 }
@@ -962,16 +943,12 @@ test "Polynomial: test evaluate constant polynomial in range" {
 
     const x = cfg.roots_of_unity[123];
 
-    const evals = try allocator.alloc(Fr, FIELD_ELEMENTS_PER_BLOB);
+    var evals: [FIELD_ELEMENTS_PER_BLOB]Fr = undefined;
     for (0..FIELD_ELEMENTS_PER_BLOB) |i| evals[i] = c;
 
-    const p = Polynomial{
-        .evals = evals,
-        .allocator = allocator,
-    };
-    defer p.deinit();
+    const p = Polynomial{ .evals = evals };
 
-    const y = try p.evalAt(x, cfg);
+    const y = try p.evalAt(allocator, x, cfg);
 
     try std.testing.expectEqual(c, y);
 }
@@ -1197,8 +1174,6 @@ test "compute and verify: succeeds round trip" {
     defer cfg.deinit();
 
     var blob = try randBlob();
-    var p = try Polynomial.fromBlob(allocator, &blob);
-    defer p.deinit();
 
     const commitment_raw = try commitmentBytesFromBlob(allocator, &blob, cfg);
     const z = try frRand();
@@ -1219,11 +1194,10 @@ test "compute and verify: succeeds within domain" {
 
     for (cfg.roots_of_unity[0..25]) |z| {
         var blob = try randBlob();
-        var p = try Polynomial.fromBlob(allocator, &blob);
-        defer p.deinit();
+        var p = try Polynomial.fromBlob(&blob);
 
         const commitment_bytes = try commitmentBytesFromBlob(allocator, &blob, cfg);
-        const y = try p.evalAt(z, cfg);
+        const y = try p.evalAt(allocator, z, cfg);
 
         const proof_raw, _ = try computeKzgProofLagrange(allocator, &blob, bytesFromBlsField(z), cfg);
 
@@ -1239,9 +1213,6 @@ test "compute and verify: fails incorrect proof" {
     defer cfg.deinit();
 
     var blob = try randBlob();
-    var p = try Polynomial.fromBlob(allocator, &blob);
-    defer p.deinit();
-
     const commitment_raw = try commitmentBytesFromBlob(allocator, &blob, cfg);
     const commitment = try g1FromBytes(commitment_raw);
     const z = try frRand();
